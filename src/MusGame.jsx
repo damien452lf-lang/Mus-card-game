@@ -4369,8 +4369,11 @@ const GLOBAL_STYLES = `
     background: var(--paper);
     color: var(--ink);
     border-radius: var(--radius-xl);
-    max-width: 760px;
+    max-width: 920px;
     width: 100%;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
     box-shadow: 0 30px 80px rgba(0,0,0,0.6);
     animation: reveal-in 480ms cubic-bezier(.2,.8,.2,1);
@@ -4409,9 +4412,15 @@ const GLOBAL_STYLES = `
   .reveal-final-score .vs { color: var(--whisper); font-size: 14px; }
   .reveal-final-score .a { color: var(--aged-gold); }
   .reveal-final-score .b { color: var(--basque-red); }
-  .reveal-body { padding: 20px 28px; }
+  .reveal-body {
+    padding: 20px 28px;
+    overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 0; /* nécessaire pour que le flex enfant accepte de scroller */
+  }
+  .reveal-head, .reveal-foot { flex: none; }
   .reveal-phase-row {
-    display: flex; align-items: center; gap: 14px;
+    display: flex; align-items: flex-start; gap: 14px;
     padding: 12px 14px;
     border-radius: var(--radius);
     margin-bottom: 6px;
@@ -4432,7 +4441,15 @@ const GLOBAL_STYLES = `
     font-family: var(--font-ui);
     font-size: 13px;
     color: var(--ink-soft);
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
   }
+  .reveal-deje {
+    font-size: 12px;
+    color: var(--muted-ink);
+  }
+  .reveal-phase-detail .bet-seq { padding: 0; font-size: 10.5px; }
   .reveal-phase-detail .pts {
     color: var(--brass-dark); font-weight: 600;
     font-family: var(--font-display); font-size: 16px;
@@ -4442,6 +4459,53 @@ const GLOBAL_STYLES = `
     padding: 16px 28px 22px;
     display: flex; justify-content: flex-end; gap: 10px;
     border-top: 1px solid rgba(27,23,19,0.08);
+  }
+
+  /* ---- Section mains révélées ---- */
+  .reveal-hands {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .reveal-hand {
+    background: var(--paper-soft);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .reveal-hand.team-A { border-left: 3px solid var(--aged-gold); }
+  .reveal-hand.team-B { border-left: 3px solid var(--basque-red); }
+  .reveal-hand-head {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  }
+  .reveal-hand-name {
+    font-family: var(--font-display);
+    font-size: 14px;
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .reveal-hand-team {
+    font-family: var(--font-ui);
+    font-size: 8.5px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--brass-dark);
+  }
+  .reveal-hand-team.is-B { color: var(--oxblood); }
+  .reveal-hand-cards { display: flex; gap: 4px; }
+  .reveal-hand-sum {
+    font-family: var(--font-ui);
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--muted-ink);
+  }
+
+  /* Mobile : mains sur 2 colonnes, cartes réduites */
+  @media (max-width: 720px) {
+    .reveal-hands { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .reveal-hand { padding: 8px 8px 8px 10px; }
+    .reveal-hand .card.small { width: 30px; height: 45px; }
   }
 
   /* ============== Help drawer ============== */
@@ -5716,6 +5780,35 @@ function shortPlayerName(players, id) {
   return (players?.[id]?.name || `J${id}`).replace(/\s*\([AB]\)\s*$/, '');
 }
 
+// Actions d'enchères du coup en cours : le log s'accumule sur toute la
+// partie, on repart du dernier jalon hand-start / manche-start. Seules les
+// entrées 'action' portant un champ phase sont des actions d'enchères
+// (Mus / défausse n'en ont pas). NB : la phase Punto est loguée sous 'juego'.
+function currentHandBetActions(log) {
+  const entries = log || [];
+  let start = 0;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (entries[i].type === 'hand-start' || entries[i].type === 'manche-start') { start = i; break; }
+  }
+  return entries.slice(start).filter((e) => e.type === 'action' && e.phase);
+}
+
+// Séquence d'enchères rendue : « Toi: Embido → Aitor: Iduki »
+function BetSequence({ actions, players }) {
+  if (!actions.length) return null;
+  return (
+    <div className="bet-seq">
+      {actions.map((e, i) => (
+        <React.Fragment key={i}>
+          {i > 0 && <span className="seq-arrow"> → </span>}
+          <span className="seq-name">{shortPlayerName(players, e.player)}</span>
+          {`: ${betActionLabel(e.action)}`}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
 const LOG_PHASE_SEP = {
   grande: 'Grand', chica: 'Petit', pares: 'Paires', juego: 'Jeu', punto: 'Point',
   'pares-declaration': 'Annonce des paires', 'juego-declaration': 'Annonce du jeu',
@@ -5818,14 +5911,7 @@ function BetTracker({ state }) {
     { key: 'juego', label: state.juegoOrPunto === 'punto' ? 'Pontua' : 'Jeu' },
   ];
 
-  // Le log s'accumule sur toute la partie : on ne garde que les actions
-  // d'enchères depuis le début du coup en cours.
-  const log = state.log || [];
-  let handStart = 0;
-  for (let i = log.length - 1; i >= 0; i--) {
-    if (log[i].type === 'hand-start' || log[i].type === 'manche-start') { handStart = i; break; }
-  }
-  const handActions = log.slice(handStart).filter((e) => e.type === 'action' && e.phase);
+  const handActions = currentHandBetActions(state.log);
 
   return (
     <div className="side-panel">
@@ -5853,17 +5939,7 @@ function BetTracker({ state }) {
                   {label.includes('Mise') ? <>Mise <span className="stack-num">{top}</span></> : label}
                 </span>
               </div>
-              {seq.length > 0 && (
-                <div className="bet-seq">
-                  {seq.map((e, i) => (
-                    <React.Fragment key={i}>
-                      {i > 0 && <span className="seq-arrow"> → </span>}
-                      <span className="seq-name">{shortPlayerName(state.players, e.player)}</span>
-                      {`: ${betActionLabel(e.action)}`}
-                    </React.Fragment>
-                  ))}
-                </div>
-              )}
+              <BetSequence actions={seq} players={state.players} />
             </div>
           );
         })}
@@ -6008,9 +6084,59 @@ function SettingsPanel({ state, dispatch, visible, onClose, theme, onThemeChange
 
 /* ===== RevealOverlay ===== */
 
-function RevealOverlay({ state, dispatch }) {
+/* --- Résumés de main pour la révélation (lecture seule des évaluateurs) --- */
+
+// Rangs EFFECTIFS (effRank : 3→12, 2→1) vers libellés joueur
+const EFF_RANK_NAMES = { 12: 'Rois', 11: 'Caballos', 10: 'Sotas', 1: 'As' };
+
+function rankPhrase(rank) {
+  if (rank === 1) return "d'As";
+  return `de ${EFF_RANK_NAMES[rank] || rank}`;
+}
+
+function paresSummary(p) {
+  if (!p.has) return null;
+  if (p.type === 'pareja') return `Pareja ${rankPhrase(p.rank)}`;
+  if (p.type === 'mediak') return `Mediak ${rankPhrase(p.rank)}`;
+  if (p.highPair === p.lowPair) return `Dobliak ${rankPhrase(p.highPair)} (carré)`;
+  return `Dobliak ${rankPhrase(p.highPair)} et ${rankPhrase(p.lowPair)}`;
+}
+
+function handSummary(hand) {
+  const j = evaluateJuegoPunto(hand);
+  const paresTxt = paresSummary(evaluatePares(hand)) || 'Sans paires';
+  return `${paresTxt} · ${j.hasJuego ? `Jeu · ${j.total}` : `Total ${j.total}`}`;
+}
+
+function RevealHands({ state, theme }) {
+  return (
+    <div className="reveal-hands">
+      {state.players.map((p) => {
+        const team = TEAM_OF[p.id];
+        return (
+          <div key={p.id} className={`reveal-hand team-${team}`}>
+            <div className="reveal-hand-head">
+              <span className="reveal-hand-name">{shortPlayerName(state.players, p.id)}</span>
+              <span className={`reveal-hand-team ${team === 'B' ? 'is-B' : ''}`}>Équipe {team}</span>
+              {state.esku === p.id && <span className="badge esku">Esku</span>}
+            </div>
+            <div className="reveal-hand-cards">
+              {p.hand.map((c) => (
+                <Card key={c.id} card={c} size="small" dealing={false} theme={theme} />
+              ))}
+            </div>
+            <div className="reveal-hand-sum">{handSummary(p.hand)}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function RevealOverlay({ state, dispatch, theme }) {
   if (state.phase !== 'reveal') return null;
-  const { revealResult, score, mancheOver, mancheWinner, matchOver, matchScore } = state;
+  const { revealResult, score, mancheOver, mancheWinner, matchOver, matchScore, players } = state;
+  const handActions = currentHandBetActions(state.log);
 
   const title = matchOver
     ? `Match terminé`
@@ -6022,6 +6148,18 @@ function RevealOverlay({ state, dispatch }) {
     : mancheOver
       ? `Équipe ${mancheWinner === 'A' ? 'A · Or' : 'B · Rouge'} prend la manche`
       : 'Calcul des points';
+
+  // « Avec quoi » la phase a été gagnée : combinaison pour Paires, total pour
+  // Jeu/Pontua. Rien pour Grand/Petit (lisible directement sur les cartes).
+  const wonWith = (phase, winnerId) => {
+    if (winnerId === null || winnerId === undefined) return null;
+    const hand = players[winnerId]?.hand;
+    if (!hand) return null;
+    if (phase === 'pares') return paresSummary(evaluatePares(hand));
+    if (phase === 'juego') return `Jeu à ${evaluateJuegoPunto(hand).total}`;
+    if (phase === 'punto') return `Pontua à ${evaluateJuegoPunto(hand).total}`;
+    return null;
+  };
 
   return (
     <div className="reveal-overlay" role="dialog" aria-modal="true" aria-labelledby="reveal-title">
@@ -6036,26 +6174,48 @@ function RevealOverlay({ state, dispatch }) {
           </div>
         </div>
         <div className="reveal-body">
+          <RevealHands state={state} theme={theme} />
           {revealResult?.map((r, i) => {
             const has = !!(r.revealPoints || r.immediatePoints || r.hordagoWinnerTeam);
+            // La phase Punto est stockée/loguée sous la clé 'juego'
+            const betKey = r.phase === 'punto' ? 'juego' : r.phase;
+            const bet = state.phases?.[betKey];
+            const seq = handActions.filter((e) => e.phase === betKey);
+            const winnerId = r.hordagoWinnerTeam ? r.winnerId : r.revealPoints?.winnerId;
+            const winnerName = winnerId !== null && winnerId !== undefined
+              ? shortPlayerName(players, winnerId)
+              : null;
+            const withWhat = wonWith(r.phase, winnerId);
+            const deferred = bet?.resolution?.kind === 'iduki' ? bet.resolution.deferredPoints : null;
+
             return (
               <div key={i} className={`reveal-phase-row ${has ? 'has-points' : ''}`}>
-                <div className="reveal-phase-name">{PHASE_LABEL[r.phase]}</div>
+                <div className="reveal-phase-name">{r.phase === 'punto' ? 'Pontua' : PHASE_LABEL[r.phase]}</div>
                 <div className="reveal-phase-detail">
                   {r.hordagoWinnerTeam && (
-                    <span><strong>Hordago accepté</strong> — Équipe {r.hordagoWinnerTeam} remporte la manche</span>
-                  )}
-                  {!r.hordagoWinnerTeam && r.immediatePoints && (
-                    <span>Tira immédiat → Équipe {r.immediatePoints.team} <span className={`pts ${r.immediatePoints.team === 'B' ? 'is-B' : ''}`}>+{r.immediatePoints.points}</span></span>
-                  )}
-                  {!r.hordagoWinnerTeam && r.revealPoints && (
-                    <span style={{ marginLeft: r.immediatePoints ? 12 : 0 }}>
-                      {r.immediatePoints ? '· puis ' : ''}Équipe {r.revealPoints.team} <span className={`pts ${r.revealPoints.team === 'B' ? 'is-B' : ''}`}>+{r.revealPoints.points}</span>
+                    <span>
+                      <strong>Hordago !</strong> {winnerName ? `${winnerName} gagne` : ''}
+                      {withWhat ? ` · ${withWhat}` : ''} — Équipe {r.hordagoWinnerTeam} remporte la manche
                     </span>
                   )}
-                  {!r.hordagoWinnerTeam && !r.immediatePoints && !r.revealPoints && (
-                    <span style={{ opacity: 0.5, fontStyle: 'italic' }}>aucun point</span>
+                  {!r.hordagoWinnerTeam && r.revealPoints && (
+                    <span>
+                      <strong>{winnerName}</strong> gagne{withWhat ? ` · ${withWhat}` : ''}{' '}
+                      <span className={`pts ${r.revealPoints.team === 'B' ? 'is-B' : ''}`}>+{r.revealPoints.points}</span>
+                      {deferred ? <span className="reveal-deje"> (dont mise tenue {deferred})</span> : null}
+                    </span>
                   )}
+                  {!r.hordagoWinnerTeam && !r.revealPoints && (
+                    <span style={{ opacity: 0.5, fontStyle: 'italic' }}>
+                      {r.immediatePoints ? 'non disputé à la révélation (résolu par Tira)' : 'aucun point'}
+                    </span>
+                  )}
+                  {r.immediatePoints && (
+                    <span className="reveal-deje">
+                      Deje empoché pendant les enchères → Équipe {r.immediatePoints.team} +{r.immediatePoints.points}
+                    </span>
+                  )}
+                  <BetSequence actions={seq} players={players} />
                 </div>
               </div>
             );
@@ -6338,7 +6498,7 @@ export default function MusGame() {
       />
 
       <HelpDrawer open={showHelp} onClose={() => setShowHelp(false)} />
-      <RevealOverlay state={state} dispatch={dispatch} />
+      <RevealOverlay state={state} dispatch={dispatch} theme={cardTheme} />
       <TestsPanel visible={showTests} onClose={() => setShowTests(false)} />
     </div>
   );
