@@ -3626,10 +3626,10 @@ const GLOBAL_STYLES = `
     border: 1px solid rgba(210,168,46,0.28);
     color: var(--parchment);
     font-family: var(--font-ui);
-    font-size: 12px;
+    font-size: clamp(12px, 0.85vw, 15px);
     letter-spacing: 1.5px;
     text-transform: uppercase;
-    padding: 8px 14px;
+    padding: clamp(8px, 0.6vw, 11px) clamp(14px, 1vw, 18px);
     border-radius: var(--radius-sm);
     cursor: pointer;
     transition: all 160ms ease;
@@ -3675,7 +3675,7 @@ const GLOBAL_STYLES = `
   .is-B .team-score-row { flex-direction: row-reverse; }
   .team-score {
     font-family: var(--font-display);
-    font-size: 56px;
+    font-size: clamp(56px, 4vw, 84px);
     font-weight: 600;
     line-height: 1;
     color: var(--paper);
@@ -3684,7 +3684,7 @@ const GLOBAL_STYLES = `
   }
   .team-target {
     font-family: var(--font-ui);
-    font-size: 14px;
+    font-size: clamp(14px, 1vw, 18px);
     color: var(--whisper);
   }
   .team-progress-track {
@@ -3738,7 +3738,7 @@ const GLOBAL_STYLES = `
   }
   .manche-num {
     font-family: var(--font-display);
-    font-size: 32px;
+    font-size: clamp(32px, 2.3vw, 44px);
     color: var(--paper);
     line-height: 1;
     font-variant-numeric: tabular-nums;
@@ -3939,10 +3939,12 @@ const GLOBAL_STYLES = `
     cursor: default;
     border: 1px solid rgba(27,23,19,0.12);
   }
-  .card.large    { width: 78px;  height: 116px; }
-  .card.medium   { width: 56px;  height: 84px; }
-  .card.small    { width: 36px;  height: 54px; }
-  .card.tiny     { width: 26px;  height: 39px; }
+  /* Tailles fluides : min = taille historique, croissance au-delà de ~1400px.
+     Les media queries mobiles redéfinissent width+height en px et gardent la main. */
+  .card.large    { width: clamp(78px, 5.5vw, 122px); aspect-ratio: 78 / 116; height: auto; }
+  .card.medium   { width: clamp(56px, 4vw, 88px);    aspect-ratio: 56 / 84;  height: auto; }
+  .card.small    { width: clamp(36px, 2.55vw, 56px); aspect-ratio: 36 / 54;  height: auto; }
+  .card.tiny     { width: clamp(26px, 1.85vw, 40px); aspect-ratio: 26 / 39;  height: auto; }
   .card.clickable { cursor: pointer; }
   .card.clickable:hover {
     transform: translateY(-6px);
@@ -4112,10 +4114,10 @@ const GLOBAL_STYLES = `
   /* ============== ActionButton ============== */
   .btn {
     font-family: var(--font-ui);
-    font-size: 12px;
+    font-size: clamp(12px, 0.85vw, 16px);
     letter-spacing: 1.8px;
     text-transform: uppercase;
-    padding: 10px 18px;
+    padding: clamp(10px, 0.75vw, 14px) clamp(18px, 1.3vw, 26px);
     border-radius: var(--radius);
     cursor: pointer;
     transition: all 180ms cubic-bezier(.2,.8,.2,1);
@@ -4499,6 +4501,32 @@ const GLOBAL_STYLES = `
   }
 
   /* ============== Responsive ============== */
+
+  /* ---------- Grands écrans : layout plafonné, table sur la hauteur ---------- */
+  @media (min-width: 1101px) {
+    .topbar, .phase-rail, .game-area {
+      max-width: 1880px;
+      margin-left: auto; margin-right: auto;
+    }
+    .scoreboard {
+      width: calc(100% - 56px); /* préserve les gouttières 28px actuelles */
+      max-width: calc(1880px - 56px);
+      margin-left: auto; margin-right: auto;
+    }
+    /* Largeur dérivée de la hauteur visée pour que l'aspect-ratio 16/11
+       donne une hauteur clampée [540px, 100vh - 620px, 960px].
+       620px ≈ topbar + scoreboard + phase-rail + hand-zone + dock. */
+    .game-table {
+      width: min(100%, calc(clamp(540px, 100vh - 620px, 960px) * 16 / 11));
+      margin-left: auto; margin-right: auto;
+    }
+    .action-dock { max-width: min(900px, 100%); }
+    .avatar { width: clamp(44px, 3vw, 60px); height: clamp(44px, 3vw, 60px); font-size: clamp(18px, 1.2vw, 24px); }
+    .seat-name { font-size: clamp(15px, 1vw, 19px); }
+    .center-phase { font-size: clamp(28px, 1.9vw, 40px); }
+    .center-mise { font-size: clamp(22px, 1.5vw, 30px); }
+    .table-center { max-width: clamp(380px, 26vw, 520px); }
+  }
 
   /* Bouton flottant + drawer mobile : cachés sur desktop */
   .topbar-journal-btn { display: none; }
