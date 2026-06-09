@@ -1909,6 +1909,23 @@ function botChooseBetAction(state, botId) {
   }
   if (willingness > 0.55) return { type: 'iduki' };
   if (willingness > 0.35 && r2 < bluffChance) return { type: 'gehiago', amount: 2 };
+
+  // Partenaire HUMAIN : ne jamais trancher par Tira à sa place — déléguer
+  // (« Tira pour moi ») pour ne pas le bloquer s'il veut tenir ou relancer.
+  // Conditions : pas déjà en délégation (anti ping-pong, point 5 spec) et
+  // partenaire capable de répondre (éligible en Pares/Juego, art. 9°).
+  const partnerId = PARTNER_OF[botId];
+  const partnerIsHuman = !visible.players[partnerId].isBot;
+  const inDelegation = visible.pendingPartnerDecision &&
+    visible.pendingPartnerDecision.phaseName === phaseName &&
+    PARTNER_OF[visible.pendingPartnerDecision.requesterId] === botId;
+  const partnerCanRespond =
+    phaseName === 'pares' ? visible.paresEligible.includes(partnerId)
+    : (phaseName === 'juego' && visible.juegoOrPunto === 'juego') ? visible.juegoEligible.includes(partnerId)
+    : true;
+  if (partnerIsHuman && !inDelegation && partnerCanRespond) {
+    return { type: 'tira-for-me' };
+  }
   return { type: 'tira' };
 }
 
