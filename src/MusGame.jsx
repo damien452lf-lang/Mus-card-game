@@ -1,4 +1,4 @@
-import React, { useState, useReducer, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useReducer, useEffect, useMemo, useCallback, useRef } from 'react';
 
 /* ============================================================
    MUS — Implémentation complète conforme au règlement officiel
@@ -4246,6 +4246,19 @@ const GLOBAL_STYLES = `
     font-weight: 600;
   }
   .log-points.is-B { color: var(--oxblood); }
+  .log-sep {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 0 4px;
+    font-family: var(--font-display);
+    font-size: 10.5px;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: var(--muted-ink);
+  }
+  .log-sep::before, .log-sep::after {
+    content: ''; flex: 1; height: 1px;
+    background: rgba(27,23,19,0.16);
+  }
 
   /* ============== Bet tracker rows ============== */
   .bet-row {
@@ -4273,6 +4286,18 @@ const GLOBAL_STYLES = `
   }
   .bet-state.empty { color: var(--muted-ink); font-size: 12px; font-style: italic; font-family: var(--font-ui); }
   .bet-state .stack-num { color: var(--brass-dark); font-weight: 600; }
+  .bet-phase { border-bottom: 1px dotted rgba(27,23,19,0.08); }
+  .bet-phase:last-child { border-bottom: none; }
+  .bet-phase .bet-row { border-bottom: none; }
+  .bet-seq {
+    font-family: var(--font-ui);
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--muted-ink);
+    padding: 0 0 8px;
+  }
+  .bet-seq .seq-name { color: var(--ink); font-weight: 600; }
+  .bet-seq .seq-arrow { color: var(--brass-dark); }
 
   /* ============== Signals panel ============== */
   .sig-grid {
@@ -5623,19 +5648,29 @@ function ActionDock({ state, dispatch, selectedDiscards, setSelectedDiscards }) 
 
 function GameLog({ state }) {
   const { log, players } = state;
-  const recent = (log || []).slice(-30).reverse();
+  // On formate d'abord, on tronque ensuite : le compteur et la liste ne
+  // portent que sur les entrées réellement affichables.
+  const rows = (log || []).map((entry) => formatLogEntry(entry, players)).filter(Boolean);
+  const recent = rows.slice(-60);
+  const actionCount = recent.filter((r) => !r.separator).length;
+  const listRef = useRef(null);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [rows.length]);
 
   return (
     <div className="side-panel">
       <div className="panel-head">
         <span>Historique</span>
-        <span className="head-action">{recent.length} actions</span>
+        <span className="head-action">{actionCount} action{actionCount > 1 ? 's' : ''}</span>
       </div>
       <div className="panel-body">
-        <div className="log-list">
+        <div className="log-list" ref={listRef}>
           {recent.length === 0
             ? <div className="log-row" style={{ opacity: 0.6, fontStyle: 'italic' }}>La partie commence.</div>
-            : recent.map((entry, i) => <LogRow key={i} entry={entry} players={players} />)
+            : recent.map((row, i) => <LogRow key={i} row={row} />)
           }
         </div>
       </div>
@@ -5643,46 +5678,132 @@ function GameLog({ state }) {
   );
 }
 
-function LogRow({ entry, players }) {
-  const formatted = formatLogEntry(entry, players);
-  if (!formatted) return null;
-  const teamCls = formatted.team ? `team-${formatted.team}` : '';
+function LogRow({ row }) {
+  if (row.separator) {
+    return <div className="log-sep">{row.label}</div>;
+  }
+  const teamCls = row.team ? `team-${row.team}` : '';
   return (
     <div className="log-row">
-      <span className={`log-actor ${teamCls}`}>{formatted.actor}</span>
-      <span className="log-text">{formatted.text}</span>
-      {formatted.points && (
-        <span className={`log-points ${formatted.team === 'B' ? 'is-B' : ''}`}>+{formatted.points}</span>
-      )}
+      <span className={`log-actor ${teamCls}`}>{row.actor}</span>
+      <span className="log-text">{row.text}</span>
+      {row.points ? (
+        <span className={`log-points ${row.team === 'B' ? 'is-B' : ''}`}>+{row.points}</span>
+      ) : null}
     </div>
   );
 }
 
+// Libellés courts des actions d'enchères (partagés Historique / Enchères en cours)
+const BET_ACTION_LABELS = {
+  paso: 'Paso',
+  embido: 'Embido',
+  'hiru-embido': 'Hiru Embido',
+  gehiago: 'Gehiago',
+  tira: 'Tira',
+  iduki: 'Iduki',
+  hordago: 'Hordago',
+  'tira-for-me': 'Tira pour moi',
+};
+
+function betActionLabel(action) {
+  const base = BET_ACTION_LABELS[action?.type] || action?.type || '?';
+  return action?.type === 'gehiago' && action.amount ? `${base} +${action.amount}` : base;
+}
+
+// « Aitor (B) » → « Aitor » : l'équipe est déjà portée par la couleur
+function shortPlayerName(players, id) {
+  return (players?.[id]?.name || `J${id}`).replace(/\s*\([AB]\)\s*$/, '');
+}
+
+const LOG_PHASE_SEP = {
+  grande: 'Grand', chica: 'Petit', pares: 'Paires', juego: 'Jeu', punto: 'Point',
+  'pares-declaration': 'Annonce des paires', 'juego-declaration': 'Annonce du jeu',
+};
+
+// Formate une entrée brute de state.log en ligne lisible par un joueur.
+// Renvoie { separator, label } pour les jalons (manche / coup / phase),
+// { actor, text, team?, points? } pour le reste, null si rien à afficher.
 function formatLogEntry(entry, players) {
-  const playerName = (id) => players?.[id]?.name || `J${id}`;
+  const playerName = (id) => shortPlayerName(players, id);
+  const teamOf = (id) => (id === undefined || id === null ? undefined : TEAM_OF[id]);
+
   switch (entry.type) {
-    case 'mus':            return { actor: playerName(entry.player ?? 0), text: 'demande Mus' };
-    case 'mintza':         return { actor: playerName(entry.player ?? 0), text: 'dit Mintza · on joue !' };
-    case 'redeal':         return { actor: '·', text: `redonne (round ${entry.round})` };
-    case 'discard':        return { actor: playerName(entry.player), text: `défausse ${entry.cards?.length || 0} carte(s)` };
-    case 'paso':           return { actor: playerName(entry.player), text: 'passe', team: entry.team };
-    case 'embido':         return { actor: playerName(entry.player), text: 'mise Embido (+2)', team: entry.team };
-    case 'hiru-embido':    return { actor: playerName(entry.player), text: 'mise Hiru Embido (+3)', team: entry.team };
-    case 'gehiago':        return { actor: playerName(entry.player), text: `relance +${entry.amount}`, team: entry.team };
-    case 'tira':           return { actor: playerName(entry.player), text: 'refuse · Tira', team: entry.team };
-    case 'tira-for-me':    return { actor: playerName(entry.player), text: 'dit "Tira pour moi"', team: entry.team };
-    case 'iduki':          return { actor: playerName(entry.player), text: 'accepte · Iduki', team: entry.team };
-    case 'hordago':        return { actor: playerName(entry.player), text: 'lance HORDAGO', team: entry.team };
-    case 'declare-pares':  return { actor: playerName(entry.player), text: entry.value ? 'annonce des paires' : 'pas de paires' };
-    case 'declare-juego':  return { actor: playerName(entry.player), text: entry.value ? 'annonce du jeu' : 'pas de jeu' };
-    case 'send-signal':    return { actor: playerName(entry.player), text: `signe : ${SIGNAL_LABELS[entry.sign] || entry.sign}` };
-    case 'phase-change':   return { actor: '·', text: `passage en ${entry.to || 'phase suivante'}` };
-    case 'immediate-points': return { actor: 'Score', text: `Équipe ${entry.team} marque ${entry.points} (${entry.reason || 'tira'})`, team: entry.team, points: entry.points };
-    case 'reveal':         return { actor: '·', text: 'révélation des mains' };
-    case 'sanctions':      return { actor: '·', text: `sanctions appliquées (${entry.errors?.length || 0})` };
-    case 'illegal-action': return { actor: playerName(entry.player), text: `action ${entry.action?.type} rejetée` };
+    /* --- Jalons : séparateurs visuels --- */
+    case 'manche-start': return { separator: true, label: `Manche ${entry.manche}` };
+    case 'hand-start':   return { separator: true, label: `Coup ${entry.hand} · Manche ${entry.manche}` };
+    case 'phase-start':  return { separator: true, label: LOG_PHASE_SEP[entry.phase] || entry.phase };
+
+    /* --- Actions des joueurs --- */
+    case 'action': {
+      const a = entry.action || {};
+      const actor = playerName(entry.player);
+      const team = teamOf(entry.player);
+      switch (a.type) {
+        case 'mus':         return { actor, team, text: 'demande Mus' };
+        case 'mintza':      return { actor, team, text: 'coupe · Mintza, on joue !' };
+        case 'discard':     return { actor, team, text: `défausse ${a.count} carte${a.count > 1 ? 's' : ''}` };
+        case 'paso':        return { actor, team, text: 'passe · Paso' };
+        case 'embido':      return { actor, team, text: 'mise Embido (+2)' };
+        case 'hiru-embido': return { actor, team, text: 'mise Hiru Embido (+3)' };
+        case 'gehiago':     return { actor, team, text: `relance Gehiago (+${a.amount})` };
+        case 'tira':        return { actor, team, text: 'refuse · Tira' };
+        case 'iduki':       return { actor, team, text: 'tient · Iduki' };
+        case 'hordago':     return { actor, team, text: 'lance HORDAGO !' };
+        case 'tira-for-me': return { actor, team, text: 'délègue · « Tira pour moi »' };
+        default:            return { actor, team, text: a.type || 'agit' };
+      }
+    }
+
+    /* --- Déroulé du coup --- */
+    case 'mus-all-accepted': return { actor: '·', text: 'Mus accordé par les quatre — défausse' };
+    case 'redeal':           return { actor: '·', text: `nouvelle donne (tour de Mus ${entry.round})` };
+
+    case 'declaration': {
+      const actor = playerName(entry.player);
+      const team = teamOf(entry.player);
+      if (entry.phase === 'pares') return { actor, team, text: entry.value ? 'annonce des paires' : 'pas de paires' };
+      return { actor, team, text: entry.value ? 'annonce du Jeu (31+)' : 'pas de Jeu' };
+    }
+
+    case 'signal':
+      return {
+        actor: playerName(entry.player),
+        team: teamOf(entry.player),
+        text: `signe : ${SIGNAL_LABELS[entry.sign] || entry.sign}${entry.public ? '' : ' (discret)'}`,
+      };
+
+    case 'phase-skip': return { actor: '·', text: `phase ${PHASE_LABEL[entry.phase] || entry.phase} sautée — ${entry.reason}` };
+    case 'phase-info': return { actor: '·', text: entry.text };
+
+    case 'phase-resolved': {
+      const lbl = PHASE_LABEL[entry.phase] || entry.phase;
+      switch (entry.kind) {
+        case 'paso':             return { actor: '·', text: `${lbl} : tout le monde passe — résolution à la révélation` };
+        case 'tira':             return { actor: `Équipe ${entry.team}`, team: entry.team, text: 'empoche le Deje', points: entry.points };
+        case 'iduki':            return { actor: '·', text: `mise tenue — ${entry.stake} pts en jeu à la révélation` };
+        case 'hordago-accepted': return { actor: '·', text: 'Hordago tenu — révélation immédiate !' };
+        default:                 return { actor: '·', text: `${lbl} résolu` };
+      }
+    }
+
+    /* --- Fin de coup / manche / match --- */
+    case 'reveal': {
+      const fs = entry.finalScore || {};
+      return { actor: '·', text: `révélation des mains — Équipe A ${fs.A ?? '?'} · Équipe B ${fs.B ?? '?'}` };
+    }
+    case 'sanctions':
+      return {
+        actor: '·',
+        text: `sanctions art. 13-16 : ${(entry.adjustments || []).map((a) => `Équipe ${a.team} ${a.delta > 0 ? '+' : ''}${a.delta}`).join(', ')}`,
+      };
+    case 'match-over': return { actor: `Équipe ${entry.winner}`, team: entry.winner, text: 'remporte le match !' };
+
+    /* --- Garde-fous --- */
+    case 'illegal-action':      return { actor: playerName(entry.player), text: `action « ${entry.action?.type} » refusée` };
     case 'illegal-declaration': return { actor: playerName(entry.player), text: 'déclaration rejetée (mode honnête)' };
-    case 'illegal-signal': return { actor: playerName(entry.player), text: `signe ${entry.sign} non valide` };
+    case 'illegal-signal':      return { actor: playerName(entry.player), text: `signe « ${entry.sign} » non autorisé ici` };
+
     default: return null;
   }
 }
@@ -5696,6 +5817,16 @@ function BetTracker({ state }) {
     { key: 'pares', label: 'Paires' },
     { key: 'juego', label: state.juegoOrPunto === 'punto' ? 'Pontua' : 'Jeu' },
   ];
+
+  // Le log s'accumule sur toute la partie : on ne garde que les actions
+  // d'enchères depuis le début du coup en cours.
+  const log = state.log || [];
+  let handStart = 0;
+  for (let i = log.length - 1; i >= 0; i--) {
+    if (log[i].type === 'hand-start' || log[i].type === 'manche-start') { handStart = i; break; }
+  }
+  const handActions = log.slice(handStart).filter((e) => e.type === 'action' && e.phase);
+
   return (
     <div className="side-panel">
       <div className="panel-head"><span>Enchères en cours</span></div>
@@ -5712,12 +5843,27 @@ function BetTracker({ state }) {
           else if (bet.resolution?.kind === 'hordago-accepted') label = 'Hordago accepté';
           else if (isActive) label = `Mise ${top}`;
 
+          const seq = handActions.filter((e) => e.phase === p.key);
+
           return (
-            <div className="bet-row" key={p.key}>
-              <span className={`bet-name ${isActive ? 'active' : ''}`}>{p.label}</span>
-              <span className={`bet-state ${label === '—' ? 'empty' : ''}`}>
-                {label.includes('Mise') ? <>Mise <span className="stack-num">{top}</span></> : label}
-              </span>
+            <div className="bet-phase" key={p.key}>
+              <div className="bet-row">
+                <span className={`bet-name ${isActive ? 'active' : ''}`}>{p.label}</span>
+                <span className={`bet-state ${label === '—' ? 'empty' : ''}`}>
+                  {label.includes('Mise') ? <>Mise <span className="stack-num">{top}</span></> : label}
+                </span>
+              </div>
+              {seq.length > 0 && (
+                <div className="bet-seq">
+                  {seq.map((e, i) => (
+                    <React.Fragment key={i}>
+                      {i > 0 && <span className="seq-arrow"> → </span>}
+                      <span className="seq-name">{shortPlayerName(state.players, e.player)}</span>
+                      {`: ${betActionLabel(e.action)}`}
+                    </React.Fragment>
+                  ))}
+                </div>
+              )}
             </div>
           );
         })}
